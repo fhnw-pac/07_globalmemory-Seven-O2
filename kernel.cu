@@ -44,10 +44,11 @@ inline void gpuAssert(cudaError_t code, const char* file, int line, bool abort =
 }
 
 
-// GPU kernel which access an vector with a strdie pattern
+// GPU kernel which access an vector with a stride pattern
 __global__ void strided_kernel(int* vec, int size, int stride)
 {
-    //ToDo: Implement the strided kernel vec[i] = vec[i] + 1 
+    size_t offset = (blockIdx.x * blockDim.x + threadIdx.x) * stride % size;
+    vec[offset] = vec[offset] + 1;
 }
 
 
@@ -57,7 +58,7 @@ void gpu_stride_loop(int* device_vec, int size)
 {
     // Define some helper values
     const int processedMB = size * sizeof(int) / 1024 / 1024 * 2;  // 2x as 1 read and 1 write
-    const int blockSize = 256;
+    const int blockSize = 1024;
     float ms;
 
     // Init CUDA events used to meassure timings 
@@ -67,17 +68,22 @@ void gpu_stride_loop(int* device_vec, int size)
 
     // Warm up GPU (The first kernel of a program has more overhead than the followings)
     gpuErrCheck(cudaEventRecord(startEvent, 0));
-    strided_kernel << <size / blockSize, blockSize >> > (device_vec, size, 1);
+    strided_kernel <<<size / blockSize, blockSize >>> (device_vec, size, 1);
     gpuErrCheck(cudaEventRecord(stopEvent, 0));
     gpuErrCheck(cudaEventSynchronize(stopEvent));
 
     gpuErrCheck(cudaEventElapsedTime(&ms, startEvent, stopEvent));
     cout << "GPU warmup kernel: " << processedMB / ms << "GB/s bandwidth" << endl;
 
-    // ToDo: Implement the strided loop analogue the CPU implementation
-    //       Calculate and print the used Bandwidth
-    //       No need to reset the device_vec to 1, we are not interessted in the result
+    for (int stride = 1; stride <= 32; stride++) {
+        gpuErrCheck(cudaEventRecord(startEvent, 0));
+        strided_kernel <<<size / blockSize, blockSize >>> (device_vec, size, stride);
+        gpuErrCheck(cudaEventRecord(stopEvent, 0));
+        gpuErrCheck(cudaEventSynchronize(stopEvent));
 
+        gpuErrCheck(cudaEventElapsedTime(&ms, startEvent, stopEvent));
+        cout << "GPU stride size " << stride << ": " << processedMB / ms << "GB/s bandwidth" << endl;
+    }
 }
 
 
